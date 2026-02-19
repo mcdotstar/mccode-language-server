@@ -1,0 +1,95 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "McCode",
+  "scopeName": "source.mccode",
+  "fileTypes": ["instr", "comp"],
+  "patterns": [
+    { "include": "#c_block" },
+    { "include": "#line_comment" },
+    { "include": "#block_comment" },
+    { "include": "#string_literal" },
+    { "include": "#component_instantiation" },
+    { "include": "#section_keywords" },
+    { "include": "#flow_keywords" },
+    { "include": "#position_keywords" },
+    { "include": "#number_literal" },
+    { "include": "#identifier" }
+  ],
+  "repository": {
+
+    "c_block": {
+      "name": "meta.embedded.block.c source.c",
+      "begin": "%\\{",
+      "end": "%\\}",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.block.mccode" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.block.mccode" }
+      },
+      "patterns": [
+        { "include": "source.c" }
+      ]
+    },
+
+    "line_comment": {
+      "name": "comment.line.double-slash.mccode",
+      "match": "//.*$"
+    },
+
+    "block_comment": {
+      "name": "comment.block.mccode",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "captures": {
+        "0": { "name": "punctuation.definition.comment.mccode" }
+      }
+    },
+
+    "string_literal": {
+      "name": "string.quoted.double.mccode",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.mccode", "match": "\\\\." }
+      ]
+    },
+
+    "component_instantiation": {
+      "comment": "COMPONENT <instance> = <type>(<args>)",
+      "name": "meta.component.instantiation.mccode",
+      "match": "(?i)\\b(COMPONENT)\\s+(\\w+)\\s*(=)\\s*(\\w+)",
+      "captures": {
+        "1": { "name": "keyword.control.mccode" },
+        "2": { "name": "entity.name.variable.mccode" },
+        "3": { "name": "keyword.operator.assignment.mccode" },
+        "4": { "name": "entity.name.type.component.mccode" }
+      }
+    },
+
+    "section_keywords": {
+      "name": "keyword.other.section.mccode",
+      "match": "(?i)\\b(DEFINE|INSTRUMENT|DECLARE|USERVARS|INITIALIZE|INITIALISE|TRACE|SAVE|FINALLY|END|DEFINITION|SETTING|OUTPUT|PARAMETERS|SHARE|MCDISPLAY|DISPLAY|CATEGORY|DEPENDENCY|METADATA|SEARCH)\\b"
+    },
+
+    "flow_keywords": {
+      "name": "keyword.control.mccode",
+      "match": "(?i)\\b(EXTEND|JUMP|WHEN|ITERATE|GROUP|SPLIT|COPY|INHERIT|REMOVABLE|NOACC|PRIVATE|INCLUDE|SHELL)\\b"
+    },
+
+    "position_keywords": {
+      "name": "keyword.other.position.mccode",
+      "match": "(?i)\\b(AT|ROTATED|RELATIVE|ABSOLUTE|PREVIOUS|NEXT|MYSELF)\\b"
+    },
+
+    "number_literal": {
+      "name": "constant.numeric.mccode",
+      "match": "\\b(\\d+\\.?\\d*([eE][+-]?\\d+)?)\\b"
+    },
+
+    "identifier": {
+      "name": "variable.other.mccode",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    }
+  }
+}

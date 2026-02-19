@@ -1,0 +1,62 @@
+{
+  "name": "mccode",
+  "displayName": "McCode",
+  "description": "McCode DSL support for McStas and McXtrace (.instr and .comp files)",
+  "version": "0.1.0",
+  "publisher": "mccode-dev",
+  "license": "BSD-3-Clause",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages", "Linters"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mccode-dev/mclsp"
+  },
+  "activationEvents": [
+    "onLanguage:mccode"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "mccode",
+        "aliases": ["McCode", "McStas", "McXtrace"],
+        "extensions": [".instr", ".comp"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mccode",
+        "scopeName": "source.mccode",
+        "path": "./syntaxes/mccode.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.c": "c"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "McCode",
+      "properties": {
+        "mccode.flavor": {
+          "type": "string",
+          "enum": ["auto", "mcstas", "mcxtrace"],
+          "default": "auto",
+          "description": "McCode flavor to use for component lookups and hover information. 'auto' infers from component names and file paths."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "mccode.showVirtualC",
+        "title": "McCode: Show Virtual C Document",
+        "category": "McCode"
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0"
+  }
+}
