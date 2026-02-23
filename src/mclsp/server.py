@@ -5,20 +5,30 @@ Registers LSP capabilities and wires the ANTLR4-backed handlers.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+import traceback
+from concurrent.futures import ThreadPoolExecutor
+
 from pygls.lsp.server import LanguageServer
 from lsprotocol import types as lsp
+
+logger = logging.getLogger(__name__)
 
 from mclsp import __version__
 from mclsp.document import parse_document, ParsedDocument
 from mclsp.flavor import FlavorResolver, _flavor_from_string
 from mclsp.handlers import get_diagnostics, get_completions, get_hover
-from mclsp.c_bridge import build_virtual_c, VirtualCDocument
+from mclsp.c_bridge import build_virtual_c, check_virtual_c, VirtualCDocument, _remove_temp_c
 
 # ---------------------------------------------------------------------------
 # Server instance + per-session state
 # ---------------------------------------------------------------------------
 
-server = LanguageServer('mclsp', __version__)
+server = LanguageServer(
+    'mclsp', __version__,
+    text_document_sync_kind=lsp.TextDocumentSyncKind.Full,
+)
 
 # Per-URI document store (populated on open/change).
 _docs: dict[str, ParsedDocument] = {}
@@ -28,6 +38,12 @@ _virtual_c: dict[str, VirtualCDocument] = {}
 
 # Flavor resolver — single instance, shared across all handlers.
 _resolver = FlavorResolver()
+
+# Debounce state: pending asyncio tasks for each URI.
+_pending_tasks: dict[str, asyncio.Task] = {}
+
+# Thread pool for the slow CTargetVisitor translation (keeps event loop free).
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='mclsp-translate')
 
 
 # ---------------------------------------------------------------------------
@@ -39,24 +55,96 @@ def _publish_diagnostics(uri: str) -> None:
     if doc is None:
         return
     diags = get_diagnostics(doc)
+    # Merge in C diagnostics from clang -fsyntax-only (if available)
+    vdoc = _virtual_c.get(uri)
+    if vdoc and vdoc.c_diagnostics:
+        for cd in vdoc.c_diagnostics:
+            diags.append(lsp.Diagnostic(
+                range=lsp.Range(
+                    start=lsp.Position(line=cd['line'], character=cd['character']),
+                    end=lsp.Position(line=cd['line'], character=cd['character'] + 1),
+                ),
+                message=cd['message'],
+                severity=cd['severity'],
+                source='clang',
+            ))
     server.text_document_publish_diagnostics(
         lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diags)
     )
 
 
 def _update_virtual_c(uri: str) -> None:
-    """(Re)build the virtual C document for *uri* and cache it."""
+    """(Re)build the virtual C document for *uri*, cache it, and push to client.
+    Runs synchronously — call from the thread executor only."""
     doc = _docs.get(uri)
     if doc is None:
         _virtual_c.pop(uri, None)
+        logger.debug('_update_virtual_c: no doc for %s', uri)
         return
     flavor = _resolver.resolve(uri, doc.source)
     flavor_str = flavor.name.lower() if hasattr(flavor, 'name') else str(flavor).lower()
-    vdoc = build_virtual_c(doc, flavor=flavor_str)
-    if vdoc is not None:
-        _virtual_c[uri] = vdoc
-    else:
+    logger.debug('_update_virtual_c: building for %s (flavor=%s)', uri, flavor_str)
+    try:
+        vdoc = build_virtual_c(doc, flavor=flavor_str)
+    except Exception:
+        logger.error('_update_virtual_c: build_virtual_c raised:\n%s', traceback.format_exc())
         _virtual_c.pop(uri, None)
+        return
+    if vdoc is not None:
+        logger.debug('_update_virtual_c: built %d chars for %s', len(vdoc.virtual_source), uri)
+        if vdoc.temp_path:
+            vdoc.c_diagnostics = check_virtual_c(vdoc.temp_path, vdoc.source_filename)
+            logger.debug('_update_virtual_c: clang found %d diagnostics for %s',
+                         len(vdoc.c_diagnostics), uri)
+        _virtual_c[uri] = vdoc
+        _push_virtual_c(uri, vdoc)
+    else:
+        logger.warning('_update_virtual_c: build_virtual_c returned None for %s', uri)
+        _virtual_c.pop(uri, None)
+
+
+async def _debounced_update(uri: str, delay: float = 0.5) -> None:
+    """Wait *delay* seconds, then publish diagnostics and rebuild virtual C.
+
+    Called via asyncio.create_task so it can be cancelled if the document
+    changes again before the delay expires (debounce while typing).
+    The slow virtual-C build (+ clang check) runs in a thread so the event
+    loop stays free.  We publish diagnostics twice: once immediately with
+    ANTLR errors (fast), and again after clang finishes (adds C errors).
+    """
+    await asyncio.sleep(delay)
+    _publish_diagnostics(uri)              # fast: ANTLR errors only
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_executor, _update_virtual_c, uri)
+    _publish_diagnostics(uri)              # slow: ANTLR + clang errors
+
+
+def _schedule_update(uri: str, delay: float = 0.5) -> None:
+    """Cancel any pending update for *uri* and schedule a new debounced one."""
+    existing = _pending_tasks.pop(uri, None)
+    if existing is not None:
+        existing.cancel()
+    task = asyncio.ensure_future(_debounced_update(uri, delay))
+    _pending_tasks[uri] = task
+    task.add_done_callback(lambda t: _pending_tasks.pop(uri, None))
+
+
+def _virtual_uri(uri: str) -> str:
+    """Compute the mccode-c:// URI for a McCode file URI."""
+    return 'mccode-c://' + uri.replace('file://', '', 1) + '.c'
+
+
+def _push_virtual_c(uri: str, vdoc) -> None:
+    """Push virtual C content to the client via a custom notification."""
+    try:
+        server.protocol.notify('$/mclsp/virtualCDocumentContent', {
+            'uri': uri,
+            'virtualUri': _virtual_uri(uri),
+            'content': vdoc.virtual_source,
+            'tempPath': vdoc.temp_path,  # real filesystem path for clangd
+        })
+    except Exception:
+        pass  # Protocol not connected (e.g. during unit tests)
 
 
 def _flavor_from_init_options(options) -> str | None:
@@ -67,6 +155,15 @@ def _flavor_from_init_options(options) -> str | None:
         return options.get('flavor')
     # Some clients send a typed object; try attribute access
     return getattr(options, 'flavor', None)
+
+
+def _apply_log_level(raw: str | None) -> None:
+    """Set the root logger level from a string like 'debug', 'warning', etc."""
+    if not raw:
+        return
+    level = getattr(logging, raw.upper(), None)
+    if isinstance(level, int):
+        logging.getLogger().setLevel(level)
 
 
 # ---------------------------------------------------------------------------
@@ -87,14 +184,17 @@ def on_initialize(params: lsp.InitializeParams):
 
     _resolver = FlavorResolver(workspace_root=workspace_root)
 
+    opts = getattr(params, 'initialization_options', None)
     # Honor an explicit flavor in initializationOptions
-    raw = _flavor_from_init_options(
-        getattr(params, 'initialization_options', None)
-    )
+    raw = _flavor_from_init_options(opts)
     if raw:
         flavor = _flavor_from_string(raw)
         if flavor is not None:
             _resolver.set_workspace_flavor(flavor)
+
+    # Honor an explicit log level in initializationOptions
+    raw_level = opts.get('logLevel') if isinstance(opts, dict) else getattr(opts, 'logLevel', None)
+    _apply_log_level(raw_level)
 
 
 @server.feature(lsp.WORKSPACE_DID_CHANGE_CONFIGURATION)
@@ -102,10 +202,18 @@ def did_change_configuration(params: lsp.DidChangeConfigurationParams):
     """Handle live config changes (e.g. user changes ``mccode.flavor`` in VS Code)."""
     settings = getattr(params, 'settings', None) or {}
     if isinstance(settings, dict):
-        raw = settings.get('mccode', {}).get('flavor', None)
+        mccode = settings.get('mccode', {})
+        raw = mccode.get('flavor', None)
         if raw is not None:
             flavor = _flavor_from_string(raw)
             _resolver.set_workspace_flavor(flavor)  # None clears the override
+        _apply_log_level(mccode.get('logLevel'))
+
+
+@server.feature(lsp.WORKSPACE_DID_CHANGE_WATCHED_FILES)
+def did_change_watched_files(params):
+    """Acknowledge file-system watch notifications (no action needed for now)."""
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +227,9 @@ def did_open(params: lsp.DidOpenTextDocumentParams):
     _docs[uri] = parse_document(uri, source)
     # Run inference eagerly on open so hover/completion get the right flavor fast
     _resolver.resolve(uri, source)
-    _update_virtual_c(uri)
+    # Publish immediately on open (not debounced — file is already saved)
     _publish_diagnostics(uri)
+    _schedule_update(uri, delay=0.0)
 
 
 @server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
@@ -130,15 +239,19 @@ def did_change(params: lsp.DidChangeTextDocumentParams):
     _docs[uri] = parse_document(uri, source)
     # Re-infer flavor: a new COMPONENT line may settle a previously ambiguous doc
     _resolver.re_infer(uri, source)
-    _update_virtual_c(uri)
-    _publish_diagnostics(uri)
+    # Debounce: wait for the user to pause typing before doing heavy work
+    _schedule_update(uri, delay=0.5)
 
 
 @server.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
 def did_close(params: lsp.DidCloseTextDocumentParams):
     uri = params.text_document.uri
+    existing = _pending_tasks.pop(uri, None)
+    if existing is not None:
+        existing.cancel()
     _docs.pop(uri, None)
-    _virtual_c.pop(uri, None)
+    vdoc = _virtual_c.pop(uri, None)
+    _remove_temp_c(vdoc.temp_path if vdoc else None)
     _resolver.forget(uri)
 
 
@@ -175,54 +288,42 @@ def hover(params: lsp.HoverParams) -> lsp.Hover | None:
 
 
 # ---------------------------------------------------------------------------
-# Custom request: $/mclsp/virtualCDocument
+# Server commands (workspace/executeCommand)
 # ---------------------------------------------------------------------------
-# The VS Code extension (or any client) can call this to obtain the stitched
-# virtual C source for a given McCode document.  The response contains the
-# full text plus a position map so the extension can open it and correlate
-# positions with the original file.
+# pygls v2 handles workspace/executeCommand natively via @server.command().
+# The extension calls:
+#   client.sendRequest('workspace/executeCommand',
+#                      {command: 'mclsp.getVirtualC', arguments: [uri, text?]})
+# The server also proactively pushes virtual C content via
+#   server.protocol.notify('$/mclsp/virtualCDocumentContent', {...})
+# whenever _update_virtual_c() succeeds.
 
-MCLSP_VIRTUAL_C_REQUEST = '$/mclsp/virtualCDocument'
+@server.command('mclsp.getVirtualC')
+def cmd_get_virtual_c(uri: str, text: str = None):
+    """Return (or build) the virtual C document for the given URI.
 
-
-@server.feature(MCLSP_VIRTUAL_C_REQUEST)
-def virtual_c_document(params):
-    """Return the virtual C document for a given McCode URI.
-
-    Expected params: ``{"uri": "file:///path/to/foo.instr"}``
-
-    Response (dict):
-    - ``"uri"``         – the original McCode URI
-    - ``"virtualUri"``  – suggested URI for the virtual C document
-                          (``"mccode-c://..."`` scheme)
-    - ``"content"``     – full virtual C source text
-    - ``"regions"``     – list of region descriptors for position mapping
+    pygls unpacks ``workspace/executeCommand`` ``arguments`` as positional
+    args, so the signature must match: ``arguments: [uri]`` or
+    ``arguments: [uri, source_text]``.
     """
-    uri = params.get('uri') if isinstance(params, dict) else getattr(params, 'uri', None)
     if uri is None:
         return None
 
+    # Parse on-demand if the document is not in the cache.
+    if uri not in _docs and text is not None:
+        _docs[uri] = parse_document(uri, text)
+
+    if _virtual_c.get(uri) is None:
+        _update_virtual_c(uri)
+
     vdoc = _virtual_c.get(uri)
     if vdoc is None:
-        # Try to build on demand if the document was open before the handler existed.
-        doc = _docs.get(uri)
-        if doc is None:
-            return None
-        _update_virtual_c(uri)
-        vdoc = _virtual_c.get(uri)
-        if vdoc is None:
-            return None
-
-    # Build a mccode-c:// URI by replacing the scheme and appending .c
-    from pathlib import PurePosixPath
-    path = uri.replace('file://', '', 1)
-    virtual_uri = f'mccode-c://{path}.c'
+        return None
 
     region_descriptors = [
         {
             'section': r.section,
             'label': r.label,
-            'mccodeTokenLine': r.mccode_token_line,
             'mccodeLine': r.mccode_line,
             'virtualLine': r.virtual_line,
             'contentLines': len(r.content.splitlines()),
@@ -232,61 +333,9 @@ def virtual_c_document(params):
 
     return {
         'uri': vdoc.source_uri,
-        'virtualUri': virtual_uri,
+        'virtualUri': _virtual_uri(uri),
         'content': vdoc.virtual_source,
+        'tempPath': vdoc.temp_path,
         'regions': region_descriptors,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Custom notification: $/mclsp/positionInCRegion
-# ---------------------------------------------------------------------------
-# Given a McCode (uri, line, col) the server responds with the corresponding
-# virtual-C (line, col) so the extension can redirect to clangd.
-
-MCLSP_POSITION_IN_C = '$/mclsp/positionInCRegion'
-
-
-@server.feature(MCLSP_POSITION_IN_C)
-def position_in_c_region(params):
-    """Map a McCode cursor position to the virtual C document.
-
-    Expected params::
-
-        {"uri": "...", "line": <1-based>, "col": <0-based>}
-
-    Returns::
-
-        {"inCRegion": true, "virtualUri": "...", "virtualLine": N, "virtualCol": N}
-        {"inCRegion": false}
-    """
-    if isinstance(params, dict):
-        uri = params.get('uri')
-        line = params.get('line', 0)
-        col = params.get('col', 0)
-    else:
-        uri = getattr(params, 'uri', None)
-        line = getattr(params, 'line', 0)
-        col = getattr(params, 'col', 0)
-
-    if uri is None:
-        return {'inCRegion': False}
-
-    vdoc = _virtual_c.get(uri)
-    if vdoc is None:
-        return {'inCRegion': False}
-
-    result = vdoc.mccode_to_virtual(line, col)
-    if result is None:
-        return {'inCRegion': False}
-
-    vline, vcol = result
-    path = uri.replace('file://', '', 1)
-    virtual_uri = f'mccode-c://{path}.c'
-    return {
-        'inCRegion': True,
-        'virtualUri': virtual_uri,
-        'virtualLine': vline,
-        'virtualCol': vcol,
     }
 

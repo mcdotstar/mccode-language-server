@@ -38,16 +38,29 @@ def _build_parser() -> argparse.ArgumentParser:
         default=False,
         help='Print the mclsp version and exit',
     )
+    p.add_argument(
+        '--log-level',
+        metavar='LEVEL',
+        default='WARNING',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        help='Logging level written to stderr (default: WARNING)',
+    )
     return p
 
 
 def mclsp() -> None:
     """Entry point for the ``mclsp`` command."""
-    from mclsp.server import server
-    from mclsp import __version__
-
+    import logging
     parser = _build_parser()
     args = parser.parse_args()
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format='%(levelname)s %(name)s: %(message)s',
+        stream=sys.stderr,
+    )
+
+    from mclsp.server import server
+    from mclsp import __version__
 
     if args.version:
         print(f'mclsp {__version__}')
