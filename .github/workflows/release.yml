@@ -93,13 +93,20 @@ jobs:
       url: https://marketplace.visualstudio.com/items?itemName=mcdotstar.mccode
 
     steps:
-      - uses: actions/download-artifact@v7
+      - name: Download Artifact
+        uses: actions/download-artifact@v7
         with:
           name: vsix
           path: vsix
+
+      - name: Where is the artifact?
+        run: ls -R vsix
+
+      - name: Can we use the output?
+        run: ls -R ${{ steps.downloadArtifact.outputs.download-path }}
 
       - uses: HaaLeo/publish-vscode-extension@v2
         with:
           pat: ${{ secrets.MSVC_MARKETPLACE_TOKEN }}
           registryUrl: https://marketplace.visualstudio.com
-          extensionFile: vsix/*.vsix
+          extensionFile: ${{ steps.downloadArtifact.outputs.download-path }}/*.vsix
