@@ -1,0 +1,19 @@
+# Files excluded from the .vsix package.
+# vsce includes everything not matched here (plus everything in .gitignore is also excluded by default).
+
+# Old local build artifacts
+*.vsix
+
+# npm bookkeeping — not needed at runtime (vsce excludes node_modules by default,
+# but be explicit about the lock file too)
+package-lock.json
+.npmrc
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Test / CI files that shouldn't ship in the extension
+.github/

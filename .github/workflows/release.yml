@@ -18,6 +18,8 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
 
       - name: Build sdist and wheel
         run: pipx run build
@@ -42,6 +44,8 @@ jobs:
 
     steps:
       - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
 
       - uses: actions/download-artifact@v7
         with:
