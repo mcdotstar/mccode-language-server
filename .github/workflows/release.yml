@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Python package → PyPI
+  # ---------------------------------------------------------------------------
+  build-python:
+    name: Build Python package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+
+      - name: Build sdist and wheel
+        run: pipx run build
+
+      - name: Check package metadata
+        run: pipx run twine check dist/*
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: python-dist
+          path: dist/*
+
+  publish-python:
+    name: Publish to PyPI
+    needs: build-python
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mclsp
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+
+    steps:
+      - uses: actions/setup-python@v6
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: python-dist
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ---------------------------------------------------------------------------
+  # VS Code extension → Marketplace
+  # ---------------------------------------------------------------------------
+  build-extension:
+    name: Package VS Code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode-extension
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package extension
+        run: npx @vscode/vsce package --no-dependencies
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: vsix
+          path: vscode-extension/*.vsix
+
+  publish-extension:
+    name: Publish to VS Code Marketplace
+    needs: build-extension
+    runs-on: ubuntu-latest
+    environment:
+      name: vscode-marketplace
+      url: https://marketplace.visualstudio.com/items?itemName=mccode-dev.mccode
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: vsix
+          path: vsix
+
+      - uses: HaaLeo/publish-vscode-extension@v2
+        with:
+          pat: ${{ secrets.VSCE_PAT }}
+          extensionFile: vsix/*.vsix
+          registries: vsce

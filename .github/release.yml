@@ -1,0 +1,25 @@
+# .github/release.yml
+# Controls the auto-generated release notes on GitHub Releases.
+
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+    authors:
+      - octocat
+  categories:
+    - title: Breaking Changes 🛠
+      labels:
+        - Semver-Major
+        - breaking-change
+    - title: Exciting New Features 🎉
+      labels:
+        - Semver-Minor
+        - enhancement
+    - title: Bug Fixes 🐛
+      labels:
+        - bug
+        - fix
+    - title: Other Changes
+      labels:
+        - "*"
