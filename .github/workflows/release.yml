@@ -96,6 +96,6 @@ jobs:
 
       - uses: HaaLeo/publish-vscode-extension@v2
         with:
-          pat: ${{ secrets.VSCE_PAT }}
+          pat: ${{ secrets.MSVC_MARKETPLACE_TOKEN }}
+          registryUrl: https://marketplace.visualstudio.com
           extensionFile: vsix/*.vsix
-          registries: vsce
