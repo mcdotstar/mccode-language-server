@@ -2,7 +2,7 @@
   "name": "mccode",
   "displayName": "McCode",
   "description": "McCode DSL support for McStas and McXtrace (.instr and .comp files)",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "publisher": "mccode-dev",
   "license": "BSD-3-Clause",
   "engines": { "vscode": "^1.75.0" },
@@ -40,7 +40,12 @@
         "mccode.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the mclsp executable. Leave empty to use 'mclsp' from PATH (or set the MCLSP_SERVER environment variable). Set this to the full path of the mclsp script in your virtual environment, e.g. '/home/user/Code/mclsp/.venv/bin/mclsp'."
+          "description": "Path to the mclsp executable or Python interpreter to run mclsp with. Leave empty to auto-discover (checks PATH then pip-installs mclsp if needed). Examples: '/home/user/.venv/bin/mclsp' or '/usr/bin/python3'."
+        },
+        "mccode.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python interpreter used to run 'python -m mclsp --stdio'. Overrides auto-discovery of Python. Useful when the VS Code Python extension is not installed or selects the wrong interpreter."
         },
         "mccode.flavor": {
           "type": "string",
@@ -66,6 +71,11 @@
       {
         "command": "mccode.showVirtualC",
         "title": "McCode: Show Virtual C Document",
+        "category": "McCode"
+      },
+      {
+        "command": "mccode.reinstallServer",
+        "title": "McCode: Reinstall language server (mclsp)",
         "category": "McCode"
       }
     ]

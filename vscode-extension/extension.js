@@ -1,9 +1,12 @@
 // McCode VS Code extension – launches mclsp as a stdio language server.
-// Requires `mclsp` to be installed and on PATH (pip install mclsp).
+// Automatically installs mclsp via pip if it is not already available.
 
 const vscode = require('vscode');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 
+const execFileAsync = promisify(execFile);
 let client;
 
 // ---------------------------------------------------------------------------
@@ -40,6 +43,153 @@ class McCodeVirtualCProvider {
 }
 
 const virtualCProvider = new McCodeVirtualCProvider();
+
+// ---------------------------------------------------------------------------
+// Server discovery and auto-install
+// ---------------------------------------------------------------------------
+
+/** Try running `cmd` with a single argument; return true if it doesn't ENOENT. */
+async function commandExists(cmd) {
+  try {
+    await execFileAsync(cmd, ['--version'], { timeout: 5000 });
+    return true;
+  } catch (e) {
+    // ENOENT / EACCES → not found.  Any other error (bad exit code) → found.
+    return e.code !== 'ENOENT' && e.code !== 'EACCES';
+  }
+}
+
+/** Return a Python 3.10+ interpreter path, or null if none found.
+ *  Checks: mccode.pythonPath setting → VS Code Python extension → python3 → python.
+ */
+async function findPython() {
+  // 1. Explicit setting
+  const config = vscode.workspace.getConfiguration('mccode');
+  const configuredPython = (config.get('pythonPath') || '').trim();
+  if (configuredPython && await commandExists(configuredPython)) return configuredPython;
+
+  // 2. VS Code Python extension active interpreter.
+  const pyExt = vscode.extensions.getExtension('ms-python.python');
+  if (pyExt) {
+    try {
+      await pyExt.activate();
+      const interp =
+        pyExt.exports?.settings?.getExecutionDetails?.()?.execCommand?.[0] ||
+        pyExt.exports?.environments?.getActiveEnvironmentPath?.()?.path;
+      if (interp && await commandExists(interp)) return interp;
+    } catch (_) { /* ignore */ }
+  }
+
+  // Fall back to PATH candidates.
+  for (const candidate of ['python3', 'python']) {
+    try {
+      const { stdout } = await execFileAsync(candidate, ['--version'], { timeout: 5000 });
+      // stdout: "Python 3.x.y" — require >= 3.10
+      const m = stdout.match(/Python 3\.(\d+)/);
+      if (m && parseInt(m[1], 10) >= 10) return candidate;
+    } catch (_) { /* not found or wrong version */ }
+  }
+  return null;
+}
+
+/** Return true if `python -m mclsp --version` exits successfully. */
+async function isMclspInstalled(python) {
+  try {
+    await execFileAsync(python, ['-m', 'mclsp', '--version'], { timeout: 10000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Run `python -m pip install --upgrade mclsp` inside a progress notification. */
+async function installMclsp(python) {
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'McCode: installing mclsp language server…',
+      cancellable: false,
+    },
+    async (progress) => {
+      progress.report({ message: 'running pip install mclsp' });
+      try {
+        await execFileAsync(python, ['-m', 'pip', 'install', '--upgrade', 'mclsp'],
+          { timeout: 120_000 });
+        return true;
+      } catch (e) {
+        vscode.window.showErrorMessage(
+          `McCode: pip install mclsp failed: ${e.message}\n` +
+          'You can install it manually with: pip install mclsp'
+        );
+        return false;
+      }
+    }
+  );
+}
+
+/**
+ * Resolve the server command and args to launch mclsp.
+ *
+ * Resolution order:
+ *   1. mccode.serverPath setting (explicit user override)
+ *   2. MCLSP_SERVER environment variable
+ *   3. `mclsp` on PATH
+ *   4. `<python> -m mclsp` (auto-discovered Python, auto-install if needed)
+ *
+ * Returns `{ command, args }` or `null` if the server cannot be found/installed.
+ */
+async function resolveMclspServer(context) {
+  const config = vscode.workspace.getConfiguration('mccode');
+
+  // 1. Explicit setting
+  const configuredPath = (config.get('serverPath') || '').trim();
+  if (configuredPath) {
+    return { command: configuredPath, args: ['--stdio'] };
+  }
+
+  // 2. Environment variable
+  if (process.env.MCLSP_SERVER) {
+    return { command: process.env.MCLSP_SERVER, args: ['--stdio'] };
+  }
+
+  // 3. mclsp script on PATH
+  if (await commandExists('mclsp')) {
+    return { command: 'mclsp', args: ['--stdio'] };
+  }
+
+  // 4. Locate a Python interpreter
+  const python = await findPython();
+  if (!python) {
+    vscode.window.showErrorMessage(
+      'McCode: could not find Python 3.10+. ' +
+      'Install Python and run: pip install mclsp\n' +
+      'Or set mccode.serverPath to the full path of the mclsp executable.',
+      'Open settings'
+    ).then((choice) => {
+      if (choice === 'Open settings') {
+        vscode.commands.executeCommand('workbench.action.openSettings', 'mccode.serverPath');
+      }
+    });
+    return null;
+  }
+
+  // Check / install mclsp in that Python
+  if (!await isMclspInstalled(python)) {
+    const choice = await vscode.window.showInformationMessage(
+      'McCode: the mclsp language server is not installed.',
+      { modal: false },
+      'Install now',
+      'Not now',
+    );
+    if (choice !== 'Install now') return null;
+    const ok = await installMclsp(python);
+    if (!ok) return null;
+  }
+
+  // Cache the resolved Python so subsequent activations skip the search.
+  await context.globalState.update('mclsp.resolvedPython', python);
+  return { command: python, args: ['-m', 'mclsp', '--stdio'] };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -82,7 +232,7 @@ async function refreshVirtualC(mccodeUri, sourceText) {
 // Extension lifecycle
 // ---------------------------------------------------------------------------
 
-function activate(context) {
+async function activate(context) {
   // Register the mccode-c:// content provider early so VS Code can open those
   // URIs even before the language server has responded.
   const providerDisposable = vscode.workspace.registerTextDocumentContentProvider(
@@ -91,12 +241,13 @@ function activate(context) {
   );
   context.subscriptions.push(providerDisposable);
 
-  const config = vscode.workspace.getConfiguration('mccode');
-  const mclspCommand = config.get('serverPath') || process.env.MCLSP_SERVER || 'mclsp';
+  // Resolve the server command (auto-install if needed); bail if unavailable.
+  const server = await resolveMclspServer(context);
+  if (!server) return;
 
   const serverOptions = {
-    command: mclspCommand,
-    args: ['--stdio'],
+    command: server.command,
+    args: server.args,
     transport: TransportKind.stdio,
   };
 
@@ -201,6 +352,26 @@ function activate(context) {
       } else {
         const vdoc = await vscode.workspace.openTextDocument({ content: result.content, language: 'c' });
         await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+      }
+    }),
+  );
+
+  // Register command: "McCode: Reinstall language server"
+  context.subscriptions.push(
+    vscode.commands.registerCommand('mccode.reinstallServer', async () => {
+      const python = context.globalState.get('mclsp.resolvedPython') || await findPython();
+      if (!python) {
+        vscode.window.showErrorMessage('McCode: no Python interpreter found.');
+        return;
+      }
+      const ok = await installMclsp(python);
+      if (ok) {
+        vscode.window.showInformationMessage(
+          'McCode: mclsp installed. Reload window to apply.',
+          'Reload'
+        ).then((choice) => {
+          if (choice === 'Reload') vscode.commands.executeCommand('workbench.action.reloadWindow');
+        });
       }
     }),
   );
