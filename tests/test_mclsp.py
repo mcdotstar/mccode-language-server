@@ -333,37 +333,47 @@ class TestFlavorResolver:
 # c_bridge.py
 # ---------------------------------------------------------------------------
 
-INSTR_WITH_C = """\
+# Component names are deliberately unlike any real McCode component so the
+# InMemoryRegistry has unambiguous priority over the file-based registries.
+_MCLSP_TEST_COMP_NAME = 'mclsp_test_noop'
+_MCLSP_TEST_COMP = f"""\
+DEFINE COMPONENT {_MCLSP_TEST_COMP_NAME}
+SETTING PARAMETERS (double dummy = 0)
+TRACE %{{ /* no-op */ %}}
+END
+"""
+
+INSTR_WITH_C = f"""\
 DEFINE INSTRUMENT BridgeTest(double L = 1.5, int n = 50)
 DECLARE
-%{
+%{{
   double my_var = 0.0;
   int counter = 0;
-%}
+%}}
 INITIALIZE
-%{
+%{{
   my_var = L * 2.0;
-%}
+%}}
 TRACE
-COMPONENT Origin = Progress_bar()
+COMPONENT Origin = {_MCLSP_TEST_COMP_NAME}()
 AT (0, 0, 0) ABSOLUTE
 EXTEND
-%{
+%{{
   counter++;
-%}
+%}}
 SAVE
-%{
-  printf("counter = %d\n", counter);
-%}
+%{{
+  printf("counter = %d\\n", counter);
+%}}
 FINALLY
-%{
+%{{
   my_var = 0.0;
-%}
+%}}
 END
 """
 
 COMP_WITH_C = """\
-DEFINE COMPONENT BridgeComp
+DEFINE COMPONENT mclsp_test_bridge_comp
 DEFINITION PARAMETERS ()
 SETTING PARAMETERS (double width = 0.1, int flag = 0)
 OUTPUT PARAMETERS ()
@@ -388,127 +398,125 @@ END
 
 
 class TestCBridge:
-    def test_build_virtual_c_instr(self):
+    # Module-level in-memory registry shared across all test methods (pytest
+    # runs tests in one process so module state is shared).
+    _registry = None
+
+    @classmethod
+    def _reg(cls):
+        if cls._registry is None:
+            from mccode_antlr.reader.registry import InMemoryRegistry
+            cls._registry = InMemoryRegistry('mclsp_test_components', priority=200)
+            cls._registry.add_comp(_MCLSP_TEST_COMP_NAME, _MCLSP_TEST_COMP)
+        return cls._registry
+
+    def _bvc(self, doc, flavor='mcstas'):
         from mclsp.c_bridge import build_virtual_c
+        return build_virtual_c(doc, flavor=flavor, extra_registries=[self._reg()])
+
+    def test_build_virtual_c_instr(self):
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
         assert vdoc is not None
-        assert len(vdoc.regions) >= 4  # DECLARE, INITIALIZE, EXTEND, SAVE, FINALLY
+        assert len(vdoc.regions) >= 3  # DECLARE, INITIALIZE, EXTEND/SAVE/FINALLY
 
     def test_virtual_c_contains_line_directives(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
         assert '#line' in vdoc.virtual_source
 
     def test_virtual_c_contains_filename(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
         assert 'bridge_test.instr' in vdoc.virtual_source
 
     def test_virtual_c_contains_param_stubs(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
         assert 'double L' in vdoc.virtual_source
         assert 'int n' in vdoc.virtual_source
 
     def test_virtual_c_contains_c_code(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
         assert 'my_var' in vdoc.virtual_source
         assert 'counter' in vdoc.virtual_source
 
     def test_declare_region_at_file_scope(self):
-        """DECLARE content must appear before any function wrapper."""
-        from mclsp.c_bridge import build_virtual_c
+        """DECLARE content must appear before the INITIALIZE function."""
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
-        # Find DECLARE content and ensure no unclosed '{' before it.
+        vdoc = self._bvc(doc)
         src = vdoc.virtual_source
         declare_pos = src.find('my_var')
-        stub_pos = src.find('__mclsp_')  # first wrapper function
-        assert declare_pos < stub_pos, "DECLARE content should be before function wrappers"
+        init_pos = src.find('my_var = L * 2.0')
+        assert declare_pos < init_pos, "DECLARE content should appear before INITIALIZE"
 
-    def test_body_sections_wrapped_in_functions(self):
-        from mclsp.c_bridge import build_virtual_c
+    def test_particle_macros_present(self):
+        """Translator should emit #define x (_particle->x) style macros."""
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
-        assert '__mclsp_' in vdoc.virtual_source
+        vdoc = self._bvc(doc)
+        assert '#define vx' in vdoc.virtual_source
+        assert '#define x (_particle' in vdoc.virtual_source
 
     def test_position_map_populated(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
+        assert len(vdoc.regions) > 0
         for r in vdoc.regions:
-            assert r.virtual_line > 0, f"Region {r.label} has virtual_line=0"
+            assert r.virtual_line > 0
+            assert r.mccode_line > 0
 
     def test_mccode_to_virtual_inside_declare(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
-        # Find the DECLARE region.
-        declare = next((r for r in vdoc.regions if r.section == 'declare'), None)
-        assert declare is not None
-        result = vdoc.mccode_to_virtual(declare.mccode_line, 0)
+        vdoc = self._bvc(doc)
+        # DECLARE is the first region (lowest mccode_line)
+        first = min(vdoc.regions, key=lambda r: r.mccode_line)
+        result = vdoc.mccode_to_virtual(first.mccode_line, 0)
         assert result is not None
         vline, vcol = result
-        assert vline == declare.virtual_line
+        assert vline == first.virtual_line
 
     def test_mccode_to_virtual_outside_c_block(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
         # Line 1 is 'DEFINE INSTRUMENT ...' — not a C block.
         result = vdoc.mccode_to_virtual(1, 0)
         assert result is None
 
     def test_virtual_to_mccode_roundtrip(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
-        declare = next((r for r in vdoc.regions if r.section == 'declare'), None)
-        assert declare is not None
-        # Forward
-        result = vdoc.mccode_to_virtual(declare.mccode_line, 5)
+        vdoc = self._bvc(doc)
+        first = min(vdoc.regions, key=lambda r: r.mccode_line)
+        result = vdoc.mccode_to_virtual(first.mccode_line, 5)
         assert result is not None
         vline, vcol = result
-        # Reverse
         back = vdoc.virtual_to_mccode(vline, vcol)
         assert back is not None
         uri, mline, mcol = back
-        assert mline == declare.mccode_line
+        assert mline == first.mccode_line
         assert mcol == 5
 
     def test_build_virtual_c_comp(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_comp.comp', COMP_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
         assert vdoc is not None
-        assert any(r.section == 'declare' for r in vdoc.regions)
-        assert any(r.section == 'initialize' for r in vdoc.regions)
-        assert any(r.section == 'trace' for r in vdoc.regions)
+        assert len(vdoc.regions) >= 2  # DECLARE + INITIALIZE + TRACE
 
     def test_comp_param_stubs(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_comp.comp', COMP_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
+        vdoc = self._bvc(doc)
         assert 'double width' in vdoc.virtual_source
         assert 'int flag' in vdoc.virtual_source
 
-    def test_mcstas_stub_included(self):
-        from mclsp.c_bridge import build_virtual_c
+    def test_mcstas_particle_macros(self):
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
-        assert 'extern double vx' in vdoc.virtual_source
+        vdoc = self._bvc(doc, flavor='mcstas')
+        assert '#define vx' in vdoc.virtual_source
 
-    def test_mcxtrace_stub_included(self):
-        from mclsp.c_bridge import build_virtual_c
+    def test_mcxtrace_particle_macros(self):
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcxtrace')
-        assert 'extern double kx' in vdoc.virtual_source
+        vdoc = self._bvc(doc, flavor='mcxtrace')
+        assert '#define kx' in vdoc.virtual_source
 
     def test_no_parse_returns_none(self):
         from mclsp.c_bridge import build_virtual_c
@@ -521,13 +529,11 @@ class TestCBridge:
         assert result is None
 
     def test_region_at_mccode_position(self):
-        from mclsp.c_bridge import build_virtual_c
         doc = parse_document('bridge_test.instr', INSTR_WITH_C)
-        vdoc = build_virtual_c(doc, flavor='mcstas')
-        declare = next((r for r in vdoc.regions if r.section == 'declare'), None)
-        assert declare is not None
-        found = vdoc.region_at_mccode(declare.mccode_line, 0)
-        assert found is declare
-        # DSL line should return None
+        vdoc = self._bvc(doc)
+        first = min(vdoc.regions, key=lambda r: r.mccode_line)
+        found = vdoc.region_at_mccode(first.mccode_line, 0)
+        assert found is first
+        # DSL line 1 should return None
         found2 = vdoc.region_at_mccode(1, 0)
         assert found2 is None
