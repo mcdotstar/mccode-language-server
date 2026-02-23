@@ -99,14 +99,12 @@ jobs:
           name: vsix
           path: vsix
 
-      - name: Where is the artifact?
-        run: ls -R vsix
-
-      - name: Can we use the output?
-        run: ls -R ${{ steps.downloadArtifact.outputs.download-path }}
+      - name: Find VSIX file
+        id: find_vsix
+        run: echo "path=$(ls vsix/*.vsix | head -1)" >> "$GITHUB_OUTPUT"
 
       - uses: HaaLeo/publish-vscode-extension@v2
         with:
           pat: ${{ secrets.MSVC_MARKETPLACE_TOKEN }}
           registryUrl: https://marketplace.visualstudio.com
-          extensionFile: ${{ steps.downloadArtifact.outputs.download-path }}/*.vsix
+          extensionFile: ${{ steps.find_vsix.outputs.path }}
