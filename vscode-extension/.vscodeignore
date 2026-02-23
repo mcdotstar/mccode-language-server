@@ -4,8 +4,7 @@
 # Old local build artifacts
 *.vsix
 
-# npm bookkeeping — not needed at runtime (vsce excludes node_modules by default,
-# but be explicit about the lock file too)
+# npm bookkeeping — not needed at runtime
 package-lock.json
 .npmrc
 

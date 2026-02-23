@@ -52,4 +52,4 @@ jobs:
         run: npm ci
 
       - name: Check extension metadata
-        run: npx @vscode/vsce ls --no-dependencies
+        run: npx @vscode/vsce ls
