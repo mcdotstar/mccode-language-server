@@ -76,6 +76,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set version from git tag
+        # GITHUB_REF_NAME is e.g. "v0.3.9"; strip the leading 'v' for npm.
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
+
       - name: Package extension
         run: npx @vscode/vsce package --no-dependencies
 

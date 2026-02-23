@@ -241,6 +241,82 @@ async function activate(context) {
   );
   context.subscriptions.push(providerDisposable);
 
+  // Register command: "McCode: Show Virtual C Document"
+  // Registered unconditionally so VS Code always finds it, even if the server
+  // hasn't started yet or failed to start.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('mccode.showVirtualC', async () => {
+      if (!client) {
+        vscode.window.showErrorMessage(
+          'McCode: language server is not running. Check the McCode Language Server output channel.',
+          'Open settings'
+        ).then((choice) => {
+          if (choice === 'Open settings') {
+            vscode.commands.executeCommand('workbench.action.openSettings', 'mccode.serverPath');
+          }
+        });
+        return;
+      }
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showInformationMessage('No active editor.');
+        return;
+      }
+      const doc = editor.document;
+      if (!doc.uri.path.match(/\.(instr|comp)$/i)) {
+        vscode.window.showInformationMessage('Active file is not a McCode .instr or .comp file.');
+        return;
+      }
+      // Fetch directly via executeCommand — avoids TextDocumentContentProvider
+      // caching issues where VS Code holds a stale "loading…" copy.
+      let result;
+      try {
+        result = await client.sendRequest('workspace/executeCommand', {
+          command: 'mclsp.getVirtualC',
+          arguments: [doc.uri.toString(), doc.getText()],
+        });
+        if (!result || !result.content) {
+          vscode.window.showErrorMessage('McCode: server returned no virtual C content.');
+          return;
+        }
+      } catch (e) {
+        vscode.window.showErrorMessage(`McCode: failed to get virtual C document: ${e.message}`);
+        return;
+      }
+      // Open the real temp .c file if available (lets clangd analyse it and
+      // report diagnostics back to the McCode file via #line directives).
+      // Fall back to an untitled doc if tempPath isn't provided.
+      if (result.tempPath) {
+        const fileUri = vscode.Uri.file(result.tempPath);
+        const vdoc = await vscode.workspace.openTextDocument(fileUri);
+        await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+      } else {
+        const vdoc = await vscode.workspace.openTextDocument({ content: result.content, language: 'c' });
+        await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+      }
+    }),
+  );
+
+  // Register command: "McCode: Reinstall language server"
+  context.subscriptions.push(
+    vscode.commands.registerCommand('mccode.reinstallServer', async () => {
+      const python = context.globalState.get('mclsp.resolvedPython') || await findPython();
+      if (!python) {
+        vscode.window.showErrorMessage('McCode: no Python interpreter found.');
+        return;
+      }
+      const ok = await installMclsp(python);
+      if (ok) {
+        vscode.window.showInformationMessage(
+          'McCode: mclsp installed. Reload window to apply.',
+          'Reload'
+        ).then((choice) => {
+          if (choice === 'Reload') vscode.commands.executeCommand('workbench.action.reloadWindow');
+        });
+      }
+    }),
+  );
+
   // Resolve the server command (auto-install if needed); bail if unavailable.
   const server = await resolveMclspServer(context);
   if (!server) return;
@@ -314,67 +390,10 @@ async function activate(context) {
   );
 
   // Register command: "McCode: Show Virtual C Document"
-  context.subscriptions.push(
-    vscode.commands.registerCommand('mccode.showVirtualC', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showInformationMessage('No active editor.');
-        return;
-      }
-      const doc = editor.document;
-      if (!doc.uri.path.match(/\.(instr|comp)$/i)) {
-        vscode.window.showInformationMessage('Active file is not a McCode .instr or .comp file.');
-        return;
-      }
-      // Fetch directly via executeCommand — avoids TextDocumentContentProvider
-      // caching issues where VS Code holds a stale "loading…" copy.
-      let result;
-      try {
-        result = await client.sendRequest('workspace/executeCommand', {
-          command: 'mclsp.getVirtualC',
-          arguments: [doc.uri.toString(), doc.getText()],
-        });
-        if (!result || !result.content) {
-          vscode.window.showErrorMessage('McCode: server returned no virtual C content.');
-          return;
-        }
-      } catch (e) {
-        vscode.window.showErrorMessage(`McCode: failed to get virtual C document: ${e.message}`);
-        return;
-      }
-      // Open the real temp .c file if available (lets clangd analyse it and
-      // report diagnostics back to the McCode file via #line directives).
-      // Fall back to an untitled doc if tempPath isn't provided.
-      if (result.tempPath) {
-        const fileUri = vscode.Uri.file(result.tempPath);
-        const vdoc = await vscode.workspace.openTextDocument(fileUri);
-        await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
-      } else {
-        const vdoc = await vscode.workspace.openTextDocument({ content: result.content, language: 'c' });
-        await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
-      }
-    }),
-  );
+  // (moved to top of activate — see above)
 
   // Register command: "McCode: Reinstall language server"
-  context.subscriptions.push(
-    vscode.commands.registerCommand('mccode.reinstallServer', async () => {
-      const python = context.globalState.get('mclsp.resolvedPython') || await findPython();
-      if (!python) {
-        vscode.window.showErrorMessage('McCode: no Python interpreter found.');
-        return;
-      }
-      const ok = await installMclsp(python);
-      if (ok) {
-        vscode.window.showInformationMessage(
-          'McCode: mclsp installed. Reload window to apply.',
-          'Reload'
-        ).then((choice) => {
-          if (choice === 'Reload') vscode.commands.executeCommand('workbench.action.reloadWindow');
-        });
-      }
-    }),
-  );
+  // (moved to top of activate — see above)
 
   client.start().then(() => {
     // Refresh all already-open McCode documents now that the server is ready.
