@@ -48,22 +48,33 @@ const virtualCProvider = new McCodeVirtualCProvider();
 function getInitializationOptions() {
   const config = vscode.workspace.getConfiguration('mccode');
   const flavor = config.get('flavor', 'auto');
+  const logLevel = config.get('logLevel', 'warning');
+  const opts = { logLevel };
   // Only pass an explicit flavor; 'auto' lets the server infer it.
-  return flavor !== 'auto' ? { flavor } : {};
+  if (flavor !== 'auto') opts.flavor = flavor;
+  return opts;
 }
 
-/** Fetch the virtual C document for *mccodeUri* from the server. */
-async function refreshVirtualC(mccodeUri) {
+/** Fetch the virtual C document for *mccodeUri* from the server.
+ *  Optionally pass *sourceText* so the server can parse on-demand if the
+ *  document isn't cached yet (handles startup race conditions).
+ *  Uses workspace/executeCommand (mclsp.getVirtualC) which pygls v2 handles natively.
+ */
+async function refreshVirtualC(mccodeUri, sourceText) {
   if (!client) return;
   try {
-    const result = await client.sendRequest('$/mclsp/virtualCDocument', {
-      uri: mccodeUri,
+    const args = sourceText !== undefined ? [mccodeUri, sourceText] : [mccodeUri];
+    const result = await client.sendRequest('workspace/executeCommand', {
+      command: 'mclsp.getVirtualC',
+      arguments: args,
     });
     if (result && result.content) {
       virtualCProvider.update(result.virtualUri, result.content);
+    } else {
+      console.warn('[mclsp] getVirtualC returned no content for', mccodeUri, result);
     }
   } catch (e) {
-    // Server may not have the document yet — silently ignore.
+    console.error('[mclsp] getVirtualC failed for', mccodeUri, e);
   }
 }
 
@@ -80,8 +91,11 @@ function activate(context) {
   );
   context.subscriptions.push(providerDisposable);
 
+  const config = vscode.workspace.getConfiguration('mccode');
+  const mclspCommand = config.get('serverPath') || process.env.MCLSP_SERVER || 'mclsp';
+
   const serverOptions = {
-    command: 'mclsp',
+    command: mclspCommand,
     args: ['--stdio'],
     transport: TransportKind.stdio,
   };
@@ -99,52 +113,54 @@ function activate(context) {
   };
 
   client = new LanguageClient('mclsp', 'McCode Language Server', serverOptions, clientOptions);
-  client.start();
 
-  // After the client is ready, hook document open/change events to refresh
-  // the virtual C document so it stays in sync with the McCode source.
-  client.onReady().then(() => {
-    // Refresh virtual C when a McCode document is opened.
-    context.subscriptions.push(
-      vscode.workspace.onDidOpenTextDocument(async (doc) => {
-        if (doc.languageId === 'mccode' || doc.uri.path.match(/\.(instr|comp)$/i)) {
-          await refreshVirtualC(doc.uri.toString());
-        }
-      }),
-    );
-
-    // Refresh virtual C when a McCode document changes (debounced: 500 ms).
-    let debounceTimer;
-    context.subscriptions.push(
-      vscode.workspace.onDidChangeTextDocument(async (event) => {
-        const doc = event.document;
-        if (doc.languageId !== 'mccode' && !doc.uri.path.match(/\.(instr|comp)$/i)) return;
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(async () => {
-          await refreshVirtualC(doc.uri.toString());
-        }, 500);
-      }),
-    );
-
-    // Clean up virtual C cache when a McCode document is closed.
-    context.subscriptions.push(
-      vscode.workspace.onDidCloseTextDocument((doc) => {
-        if (doc.languageId === 'mccode' || doc.uri.path.match(/\.(instr|comp)$/i)) {
-          // Derive virtual URI the same way the server does.
-          const virtualUri = 'mccode-c://' + doc.uri.path + '.c';
-          virtualCProvider.remove(virtualUri);
-        }
-      }),
-    );
-
-    // Refresh all already-open McCode documents (in case they were opened
-    // before the server was ready).
-    vscode.workspace.textDocuments.forEach(async (doc) => {
-      if (doc.languageId === 'mccode' || doc.uri.path.match(/\.(instr|comp)$/i)) {
-        await refreshVirtualC(doc.uri.toString());
-      }
-    });
+  // Listen for server-push virtual C notifications.  The server calls
+  // server.protocol.notify('$/mclsp/virtualCDocumentContent', {...}) after
+  // every successful build so the cache stays warm without any polling.
+  // tempPath is a real filesystem .c file written for clangd to analyse.
+  client.onNotification('$/mclsp/virtualCDocumentContent', (params) => {
+    if (params && params.virtualUri && params.content) {
+      virtualCProvider.update(params.virtualUri, params.content);
+    }
+    // The temp file is already written by the server; nothing extra needed here.
   });
+
+  // In vscode-languageclient v9, start() returns a Promise that resolves when
+  // the server is ready.  Register event hooks before start() so we don't miss
+  // documents that open during initialisation; refreshVirtualC already guards
+  // against a not-yet-ready server with try/catch.
+
+  // Refresh virtual C when a McCode document is opened.
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(async (doc) => {
+      if (doc.languageId === 'mccode' || doc.uri.path.match(/\.(instr|comp)$/i)) {
+        await refreshVirtualC(doc.uri.toString(), doc.getText());
+      }
+    }),
+  );
+
+  // Refresh virtual C when a McCode document changes (debounced: 500 ms).
+  let debounceTimer;
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(async (event) => {
+      const doc = event.document;
+      if (doc.languageId !== 'mccode' && !doc.uri.path.match(/\.(instr|comp)$/i)) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        await refreshVirtualC(doc.uri.toString(), doc.getText());
+      }, 500);
+    }),
+  );
+
+  // Clean up virtual C cache when a McCode document is closed.
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      if (doc.languageId === 'mccode' || doc.uri.path.match(/\.(instr|comp)$/i)) {
+        const virtualUri = 'mccode-c://' + doc.uri.path + '.c';
+        virtualCProvider.remove(virtualUri);
+      }
+    }),
+  );
 
   // Register command: "McCode: Show Virtual C Document"
   context.subscriptions.push(
@@ -159,12 +175,44 @@ function activate(context) {
         vscode.window.showInformationMessage('Active file is not a McCode .instr or .comp file.');
         return;
       }
-      await refreshVirtualC(doc.uri.toString());
-      const virtualUri = vscode.Uri.parse('mccode-c://' + doc.uri.path + '.c');
-      const vdoc = await vscode.workspace.openTextDocument(virtualUri);
-      await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+      // Fetch directly via executeCommand — avoids TextDocumentContentProvider
+      // caching issues where VS Code holds a stale "loading…" copy.
+      let result;
+      try {
+        result = await client.sendRequest('workspace/executeCommand', {
+          command: 'mclsp.getVirtualC',
+          arguments: [doc.uri.toString(), doc.getText()],
+        });
+        if (!result || !result.content) {
+          vscode.window.showErrorMessage('McCode: server returned no virtual C content.');
+          return;
+        }
+      } catch (e) {
+        vscode.window.showErrorMessage(`McCode: failed to get virtual C document: ${e.message}`);
+        return;
+      }
+      // Open the real temp .c file if available (lets clangd analyse it and
+      // report diagnostics back to the McCode file via #line directives).
+      // Fall back to an untitled doc if tempPath isn't provided.
+      if (result.tempPath) {
+        const fileUri = vscode.Uri.file(result.tempPath);
+        const vdoc = await vscode.workspace.openTextDocument(fileUri);
+        await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+      } else {
+        const vdoc = await vscode.workspace.openTextDocument({ content: result.content, language: 'c' });
+        await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+      }
     }),
   );
+
+  client.start().then(() => {
+    // Refresh all already-open McCode documents now that the server is ready.
+    vscode.workspace.textDocuments.forEach(async (doc) => {
+      if (doc.languageId === 'mccode' || doc.uri.path.match(/\.(instr|comp)$/i)) {
+        await refreshVirtualC(doc.uri.toString(), doc.getText());
+      }
+    });
+  });
 }
 
 function deactivate() {

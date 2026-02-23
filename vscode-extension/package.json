@@ -2,7 +2,7 @@
   "name": "mccode",
   "displayName": "McCode",
   "description": "McCode DSL support for McStas and McXtrace (.instr and .comp files)",
-  "version": "0.1.0",
+  "version": "0.3.8",
   "publisher": "mccode-dev",
   "license": "BSD-3-Clause",
   "engines": { "vscode": "^1.75.0" },
@@ -37,11 +37,28 @@
     "configuration": {
       "title": "McCode",
       "properties": {
+        "mccode.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the mclsp executable. Leave empty to use 'mclsp' from PATH (or set the MCLSP_SERVER environment variable). Set this to the full path of the mclsp script in your virtual environment, e.g. '/home/user/Code/mclsp/.venv/bin/mclsp'."
+        },
         "mccode.flavor": {
           "type": "string",
           "enum": ["auto", "mcstas", "mcxtrace"],
           "default": "auto",
           "description": "McCode flavor to use for component lookups and hover information. 'auto' infers from component names and file paths."
+        },
+        "mccode.logLevel": {
+          "type": "string",
+          "enum": ["warning", "info", "debug", "error"],
+          "enumDescriptions": [
+            "Only warnings and errors (default)",
+            "Informational messages",
+            "Verbose debug output",
+            "Errors only"
+          ],
+          "default": "warning",
+          "description": "Log level for the McCode language server output channel."
         }
       }
     },
