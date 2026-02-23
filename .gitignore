@@ -10,4 +10,4 @@ build/
 .mypy_cache/
 .ruff_cache/
 node_modules/
-vscode-extension/*.vsix
+*.vsix

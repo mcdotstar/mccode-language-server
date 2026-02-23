@@ -41,11 +41,3 @@ mclsp = "mclsp.cli:mclsp"
 where = ["src"]
 include = ["mclsp*"]
 
-# ---------------------------------------------------------------------------
-# Local development override: resolve mccode-antlr from the sibling repo so
-# the >=0.18.0 version constraint does not block local testing before that
-# release is published to PyPI.  Remove (or comment out) this section when
-# working against an installed release.
-# ---------------------------------------------------------------------------
-[tool.uv.sources]
-mccode-antlr = { path = "../mccode-tidy", editable = true }
