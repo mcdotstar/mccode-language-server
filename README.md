@@ -73,8 +73,8 @@ mclsp --tcp 2087       # listen on TCP port 2087 (useful for debugging)
 ## Development
 
 ```bash
-git clone https://github.com/mccode-dev/mclsp
+git clone https://github.com/mcdotstar/mccode-language-server.git mclsp
 cd mclsp
-uv sync --extra test    # installs mccode-antlr from ../mccode-tidy via [tool.uv.sources]
+uv sync
 uv run pytest
 ```

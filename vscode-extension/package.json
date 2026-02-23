@@ -3,13 +3,13 @@
   "displayName": "McCode",
   "description": "McCode DSL support for McStas and McXtrace (.instr and .comp files)",
   "version": "0.3.9",
-  "publisher": "mccode-dev",
+  "publisher": "mcdotstar",
   "license": "BSD-3-Clause",
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages", "Linters"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/mccode-dev/mclsp"
+    "url": "https://github.com/mcdotstar/mccode-language-server"
   },
   "activationEvents": [
     "onLanguage:mccode"

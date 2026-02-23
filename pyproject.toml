@@ -30,7 +30,7 @@ dynamic = ["version"]
 test = ["pytest>=7"]
 
 [project.urls]
-"Homepage" = "https://github.com/mccode-dev/mclsp"
+"Homepage" = "https://github.com/mcdotstar/mccode-language-server"
 
 [project.scripts]
 mclsp = "mclsp.cli:mclsp"

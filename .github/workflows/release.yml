@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: vscode-marketplace
-      url: https://marketplace.visualstudio.com/items?itemName=mccode-dev.mccode
+      url: https://marketplace.visualstudio.com/items?itemName=mcdotstar.mccode
 
     steps:
       - uses: actions/download-artifact@v7
