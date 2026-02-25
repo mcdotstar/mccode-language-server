@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Text Editors :: Integrated Development Environments (IDE)",
 ]
 dependencies = [
-    "mccode-antlr>=0.18.2",
+    "mccode-antlr>=0.18.3",
     "pygls>=1.3.0",
 ]
 dynamic = ["version"]

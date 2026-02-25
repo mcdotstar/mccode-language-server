@@ -27,9 +27,6 @@ pip install mclsp
 conda install -c conda-forge mclsp
 ```
 
-Requires `mccode-antlr >= 0.18.2` and a McCode installation (McStas or McXtrace)
-for component library lookup.
-
 ## Editor setup
 
 ### VS Code
