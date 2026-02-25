@@ -45,6 +45,82 @@ class McCodeVirtualCProvider {
 const virtualCProvider = new McCodeVirtualCProvider();
 
 // ---------------------------------------------------------------------------
+// Metadata virtual document provider
+// ---------------------------------------------------------------------------
+// Provides read-only virtual documents under the mccode-meta:// scheme, one
+// per METADATA block.  The language is determined from the MIME type so
+// VS Code's built-in language servers (JSON, YAML, XML, …) activate and
+// provide completions, hover, and diagnostics inside those blocks.
+
+/** Map VS Code languageId to a file extension for URI-based language detection. */
+const LANG_ID_TO_EXT = {
+  json: '.json', yaml: '.yaml', xml: '.xml', html: '.html',
+  python: '.py', c: '.c', cpp: '.cpp', javascript: '.js',
+  shellscript: '.sh', toml: '.toml', markdown: '.md', plaintext: '.txt',
+};
+
+class McCodeMetadataProvider {
+  constructor() {
+    this._cache = new Map();  // virtualUri (string) → content (string)
+    this._emitter = new vscode.EventEmitter();
+    this.onDidChange = this._emitter.event;
+  }
+
+  provideTextDocumentContent(uri) {
+    return this._cache.get(uri.toString()) ?? '';
+  }
+
+  update(virtualUriString, content) {
+    this._cache.set(virtualUriString, content);
+    this._emitter.fire(vscode.Uri.parse(virtualUriString));
+  }
+
+  remove(prefix) {
+    for (const key of this._cache.keys()) {
+      if (key.startsWith(prefix)) this._cache.delete(key);
+    }
+  }
+
+  /** Return all virtual URIs whose source URI begins with *prefix*. */
+  urisFor(sourceUriString) {
+    const prefix = 'mccode-meta://' + encodeURIComponent(sourceUriString) + '/';
+    return [...this._cache.keys()].filter(k => k.startsWith(prefix));
+  }
+}
+
+const metadataProvider = new McCodeMetadataProvider();
+
+/** Build the virtual URI for a metadata block (stable across refreshes). */
+function metadataVirtualUri(sourceUri, block) {
+  const ext = (block.languageId && LANG_ID_TO_EXT[block.languageId]) || '.txt';
+  const safeName = (block.name || 'metadata').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  return `mccode-meta://${encodeURIComponent(sourceUri)}/${safeName}${ext}`;
+}
+
+/**
+ * Fetch metadata blocks from mclsp and update the virtual document cache.
+ * Called after every refreshVirtualC so the virtual docs stay in sync.
+ */
+async function refreshMetadataBlocks(mccodeUri) {
+  if (!client) return;
+  try {
+    const blocks = await client.sendRequest('workspace/executeCommand', {
+      command: 'mclsp.getMetadataBlocks',
+      arguments: [mccodeUri],
+    });
+    if (!Array.isArray(blocks)) return;
+    // Remove stale entries for this source, then repopulate.
+    metadataProvider.remove('mccode-meta://' + encodeURIComponent(mccodeUri) + '/');
+    for (const block of blocks) {
+      const vUri = metadataVirtualUri(mccodeUri, block);
+      metadataProvider.update(vUri, block.content ?? '');
+    }
+  } catch (e) {
+    // Server may not support getMetadataBlocks yet — ignore silently.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Server discovery and auto-install
 // ---------------------------------------------------------------------------
 
@@ -226,6 +302,8 @@ async function refreshVirtualC(mccodeUri, sourceText) {
   } catch (e) {
     console.error('[mclsp] getVirtualC failed for', mccodeUri, e);
   }
+  // Refresh metadata block cache in parallel (errors are suppressed inside).
+  await refreshMetadataBlocks(mccodeUri);
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +318,11 @@ async function activate(context) {
     virtualCProvider,
   );
   context.subscriptions.push(providerDisposable);
+
+  // Register the mccode-meta:// content provider for METADATA block virtual docs.
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider('mccode-meta', metadataProvider)
+  );
 
   // Register command: "McCode: Show Virtual C Document"
   // Registered unconditionally so VS Code always finds it, even if the server
@@ -294,6 +377,80 @@ async function activate(context) {
         const vdoc = await vscode.workspace.openTextDocument({ content: result.content, language: 'c' });
         await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
       }
+    }),
+  );
+
+  // Register command: "McCode: Set Log Level"
+  context.subscriptions.push(
+    vscode.commands.registerCommand('mccode.setLogLevel', async () => {
+      const levels = [
+        { label: 'debug',   description: 'Verbose: show all diagnostic pipeline steps' },
+        { label: 'info',    description: 'Informational messages' },
+        { label: 'warning', description: 'Warnings and errors only (default)' },
+        { label: 'error',   description: 'Errors only' },
+      ];
+      const current = vscode.workspace.getConfiguration('mccode').get('logLevel', 'warning');
+      const picked = await vscode.window.showQuickPick(levels, {
+        title: 'McCode: Set Language Server Log Level',
+        placeHolder: `Current: ${current}`,
+      });
+      if (!picked) return;
+      await vscode.workspace.getConfiguration('mccode').update(
+        'logLevel', picked.label, vscode.ConfigurationTarget.Global
+      );
+      vscode.window.showInformationMessage(
+        `McCode log level set to "${picked.label}". Check the McCode Language Server output channel.`
+      );
+    }),
+  );
+
+  // Register command: "McCode: Show Metadata Block"
+  // Opens a METADATA block as a virtual document with the correct language
+  // so VS Code's built-in language servers activate on it.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('mccode.showMetadataBlock', async () => {
+      if (!client) {
+        vscode.window.showErrorMessage('McCode: language server is not running.');
+        return;
+      }
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !editor.document.uri.path.match(/\.(instr|comp)$/i)) {
+        vscode.window.showInformationMessage('Active file is not a McCode .instr or .comp file.');
+        return;
+      }
+      const mccodeUri = editor.document.uri.toString();
+      let blocks;
+      try {
+        blocks = await client.sendRequest('workspace/executeCommand', {
+          command: 'mclsp.getMetadataBlocks',
+          arguments: [mccodeUri],
+        });
+      } catch (e) {
+        vscode.window.showErrorMessage(`McCode: failed to get metadata blocks: ${e.message}`);
+        return;
+      }
+      if (!blocks || blocks.length === 0) {
+        vscode.window.showInformationMessage('No METADATA blocks found in this file.');
+        return;
+      }
+      const items = blocks.map((b, i) => ({
+        label: b.name || `block ${i}`,
+        description: b.mime,
+        detail: b.languageId ? `Language: ${b.languageId}` : 'Unknown language',
+        block: b,
+      }));
+      const picked = await vscode.window.showQuickPick(items, {
+        title: 'McCode: Open Metadata Block',
+        placeHolder: 'Select a METADATA block to open',
+      });
+      if (!picked) return;
+      const vUri = vscode.Uri.parse(metadataVirtualUri(mccodeUri, picked.block));
+      metadataProvider.update(vUri.toString(), picked.block.content ?? '');
+      const vdoc = await vscode.workspace.openTextDocument(vUri);
+      // Set the language so VS Code's built-in servers activate.
+      const langId = picked.block.languageId || 'plaintext';
+      await vscode.languages.setTextDocumentLanguage(vdoc, langId);
+      await vscode.window.showTextDocument(vdoc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
     }),
   );
 
@@ -385,6 +542,8 @@ async function activate(context) {
       if (doc.languageId === 'mccode' || doc.uri.path.match(/\.(instr|comp)$/i)) {
         const virtualUri = 'mccode-c://' + doc.uri.path + '.c';
         virtualCProvider.remove(virtualUri);
+        // Also remove all metadata virtual docs for this source.
+        metadataProvider.remove('mccode-meta://' + encodeURIComponent(doc.uri.toString()) + '/');
       }
     }),
   );

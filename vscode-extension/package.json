@@ -70,8 +70,18 @@
     },
     "commands": [
       {
+        "command": "mccode.setLogLevel",
+        "title": "McCode: Set Log Level",
+        "category": "McCode"
+      },
+      {
         "command": "mccode.showVirtualC",
         "title": "McCode: Show Virtual C Document",
+        "category": "McCode"
+      },
+      {
+        "command": "mccode.showMetadataBlock",
+        "title": "McCode: Show Metadata Block",
         "category": "McCode"
       },
       {

@@ -17,7 +17,7 @@ Built on top of [`mccode-antlr`](https://github.com/mccode-dev/mccode-antlr) and
 | Parameter completion inside `Component(…)` | ✅ |
 | Hover: component signature & description | ✅ |
 | Syntax highlighting (TextMate grammar) | ✅ |
-| Go-to-definition | 🔜 |
+| Go-to-definition of .comp files | ✅ |
 
 ## Installation
 
@@ -27,7 +27,7 @@ pip install mclsp
 conda install -c conda-forge mclsp
 ```
 
-Requires `mccode-antlr >= 0.18.0` and a McCode installation (McStas or McXtrace)
+Requires `mccode-antlr >= 0.18.2` and a McCode installation (McStas or McXtrace)
 for component library lookup.
 
 ## Editor setup

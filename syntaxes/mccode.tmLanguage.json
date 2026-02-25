@@ -4,6 +4,13 @@
   "scopeName": "source.mccode",
   "fileTypes": ["instr", "comp"],
   "patterns": [
+    { "include": "#metadata_json" },
+    { "include": "#metadata_yaml" },
+    { "include": "#metadata_xml" },
+    { "include": "#metadata_python" },
+    { "include": "#metadata_shell" },
+    { "include": "#metadata_js" },
+    { "include": "#metadata_declaration" },
     { "include": "#c_block" },
     { "include": "#line_comment" },
     { "include": "#block_comment" },
@@ -16,6 +23,112 @@
     { "include": "#identifier" }
   ],
   "repository": {
+
+    "metadata_json": {
+      "comment": "METADATA block with JSON content — begin matches declaration line only; %{ handled as inner punctuation so the rule works when %{ is on the next line.",
+      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:application/json|text/json)\")\\s+(\\w+)",
+      "end": "%\\}",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.mccode" },
+        "2": { "name": "string.quoted.double.mccode" },
+        "3": { "name": "entity.name.variable.mccode" }
+      },
+      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "patterns": [
+        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
+        { "include": "source.json" }
+      ]
+    },
+
+    "metadata_yaml": {
+      "comment": "METADATA block with YAML content.",
+      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/x-yaml|application/yaml|application/x-yaml|text/yaml)\")\\s+(\\w+)",
+      "end": "%\\}",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.mccode" },
+        "2": { "name": "string.quoted.double.mccode" },
+        "3": { "name": "entity.name.variable.mccode" }
+      },
+      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "patterns": [
+        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
+        { "include": "source.yaml" }
+      ]
+    },
+
+    "metadata_xml": {
+      "comment": "METADATA block with XML content.",
+      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/xml|application/xml|application/xhtml\\+xml)\")\\s+(\\w+)",
+      "end": "%\\}",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.mccode" },
+        "2": { "name": "string.quoted.double.mccode" },
+        "3": { "name": "entity.name.variable.mccode" }
+      },
+      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "patterns": [
+        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
+        { "include": "text.xml" }
+      ]
+    },
+
+    "metadata_python": {
+      "comment": "METADATA block with Python content.",
+      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/x-python|application/x-python)\")\\s+(\\w+)",
+      "end": "%\\}",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.mccode" },
+        "2": { "name": "string.quoted.double.mccode" },
+        "3": { "name": "entity.name.variable.mccode" }
+      },
+      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "patterns": [
+        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
+        { "include": "source.python" }
+      ]
+    },
+
+    "metadata_shell": {
+      "comment": "METADATA block with shell-script content.",
+      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/x-sh|application/x-sh|text/x-shellscript)\")\\s+(\\w+)",
+      "end": "%\\}",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.mccode" },
+        "2": { "name": "string.quoted.double.mccode" },
+        "3": { "name": "entity.name.variable.mccode" }
+      },
+      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "patterns": [
+        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
+        { "include": "source.shell" }
+      ]
+    },
+
+    "metadata_js": {
+      "comment": "METADATA block with JavaScript content.",
+      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/javascript|application/javascript)\")\\s+(\\w+)",
+      "end": "%\\}",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.section.mccode" },
+        "2": { "name": "string.quoted.double.mccode" },
+        "3": { "name": "entity.name.variable.mccode" }
+      },
+      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "patterns": [
+        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
+        { "include": "source.js" }
+      ]
+    },
+
+    "metadata_declaration": {
+      "comment": "Highlight METADATA declaration for MIME types not covered above (content stays as C via c_block).",
+      "match": "(?i)(\\bMETADATA\\b)\\s+(\"[^\"]*\"|\\w+)\\s+(\\w+)",
+      "captures": {
+        "1": { "name": "keyword.other.section.mccode" },
+        "2": { "name": "string.quoted.double.mccode" },
+        "3": { "name": "entity.name.variable.mccode" }
+      }
+    },
 
     "c_block": {
       "name": "meta.embedded.block.c source.c",
