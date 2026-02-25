@@ -46,6 +46,9 @@ _mcdoc_diags: dict[str, list[lsp.Diagnostic]] = {}
 # Metadata block validation diagnostics (for METADATA ... %{ ... %} blocks).
 _metadata_diags: dict[str, list[lsp.Diagnostic]] = {}
 
+# Block-delimiter typo diagnostics (e.g. {% %} or %{ }% instead of %{ %}).
+_block_delim_diags: dict[str, list[lsp.Diagnostic]] = {}
+
 # Flavor resolver — single instance, shared across all handlers.
 _resolver = FlavorResolver()
 
@@ -333,6 +336,8 @@ def _mime_to_language_id(mime: str) -> str | None:
         'text/html': 'html',
         'text/x-python': 'python',
         'application/x-python': 'python',
+        'application/x-python-code': 'python',
+        'python': 'python',
         'text/x-csrc': 'c',
         'text/x-c': 'c',
         'text/x-chdr': 'c',
@@ -343,6 +348,8 @@ def _mime_to_language_id(mime: str) -> str | None:
         'application/x-sh': 'shellscript',
         'application/toml': 'toml',
         'text/markdown': 'markdown',
+        'text/x-markdown': 'markdown',
+        'markdown': 'markdown',
         'text/plain': 'plaintext',
     }
     return _MAP.get(m)
@@ -426,6 +433,22 @@ def _validate_metadata_block(mime: str, content: str, block_start_line: int) -> 
                     end=lsp.Position(line=lsp_line, character=lsp_col + 1),
                 ),
                 message=f'XML: {e}',
+                severity=lsp.DiagnosticSeverity.Error,
+                source='mclsp-metadata',
+            ))
+
+    elif 'python' in m or m == 'python':
+        try:
+            compile(content, '<metadata>', 'exec')
+        except SyntaxError as e:
+            lsp_line = block_start_line + (e.lineno or 1) - 1
+            lsp_col = max(0, (e.offset or 1) - 1)
+            diags.append(lsp.Diagnostic(
+                range=lsp.Range(
+                    start=lsp.Position(line=lsp_line, character=lsp_col),
+                    end=lsp.Position(line=lsp_line, character=lsp_col + 1),
+                ),
+                message=f'Python: {e.msg}',
                 severity=lsp.DiagnosticSeverity.Error,
                 source='mclsp-metadata',
             ))
@@ -598,6 +621,37 @@ def _update_instr_semantic_diags(uri: str) -> None:
     _semantic_error_diags[uri] = diags
 
 
+# Patterns that look like McCode block delimiters but are wrong.
+_BAD_DELIM_PATTERNS = [
+    # {%  — Jinja2/template style open (braces and percent swapped vs. valid %{)
+    (_re.compile(r'\{%'), "'{%' is not a valid McCode block delimiter — did you mean '%{'?"),
+    # }%  — reversed close (valid McCode close is '%}', not '}%')
+    (_re.compile(r'\}%'), "'}%' is not a valid McCode block delimiter — did you mean '%}'?"),
+]
+
+
+def _update_block_delim_diags(uri: str) -> None:
+    """Scan *uri* for mistyped block delimiters and store results in *_block_delim_diags*."""
+    doc = _docs.get(uri)
+    if doc is None:
+        _block_delim_diags.pop(uri, None)
+        return
+    diags: list[lsp.Diagnostic] = []
+    for line_idx, line_text in enumerate(doc.source.splitlines()):
+        for pattern, message in _BAD_DELIM_PATTERNS:
+            for m in pattern.finditer(line_text):
+                diags.append(lsp.Diagnostic(
+                    range=lsp.Range(
+                        start=lsp.Position(line=line_idx, character=m.start()),
+                        end=lsp.Position(line=line_idx, character=m.end()),
+                    ),
+                    message=message,
+                    severity=lsp.DiagnosticSeverity.Warning,
+                    source='mclsp',
+                ))
+    _block_delim_diags[uri] = diags
+
+
 def _publish_diagnostics(uri: str) -> None:
     doc = _docs.get(uri)
     if doc is None:
@@ -609,6 +663,8 @@ def _publish_diagnostics(uri: str) -> None:
     diags.extend(_mcdoc_diags.get(uri, []))
     # Merge in METADATA block validation diagnostics (JSON/YAML/XML syntax checks).
     diags.extend(_metadata_diags.get(uri, []))
+    # Merge in block-delimiter typo diagnostics (%{ vs {%).
+    diags.extend(_block_delim_diags.get(uri, []))
     # Merge in C diagnostics from clang -fsyntax-only (if available)
     vdoc = _virtual_c.get(uri)
     if vdoc and vdoc.c_diagnostics:
@@ -638,9 +694,14 @@ def _update_virtual_c(uri: str) -> None:
         return
     flavor = _resolver.resolve(uri, doc.source)
     flavor_str = flavor.name.lower() if hasattr(flavor, 'name') else str(flavor).lower()
-    logger.debug('_update_virtual_c: building for %s (flavor=%s)', uri, flavor_str)
+    # Resolve search dirs from SEARCH/SEARCH SHELL directives + doc dir so
+    # local .comp files and shell-provided component directories are available
+    # to the translator (same priority order as the LSP hover/definition handlers).
+    search_dirs = _instr_search_dirs(uri, doc.tree) if doc.suffix == '.instr' and doc.tree else None
+    logger.debug('_update_virtual_c: building for %s (flavor=%s, search_dirs=%s)',
+                 uri, flavor_str, search_dirs)
     try:
-        vdoc = build_virtual_c(doc, flavor=flavor_str)
+        vdoc = build_virtual_c(doc, flavor=flavor_str, search_dirs=search_dirs)
     except Exception as e:
         logger.error('_update_virtual_c: build_virtual_c raised:\n%s', traceback.format_exc())
         _virtual_c.pop(uri, None)
@@ -677,6 +738,7 @@ async def _debounced_update(uri: str, delay: float = 0.5) -> None:
     _update_mcdoc_diags(uri)               # fast: McDoc header check for .comp files
     _update_instr_semantic_diags(uri)      # fast: unknown component types / parameters
     _update_metadata_diags(uri)            # fast: JSON/YAML/XML syntax in METADATA blocks
+    _update_block_delim_diags(uri)         # fast: mistyped %{ / %} delimiters
     _publish_diagnostics(uri)              # fast: ANTLR + McDoc + semantic errors
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(_executor, _update_virtual_c, uri)
@@ -899,6 +961,7 @@ def did_close(params: lsp.DidCloseTextDocumentParams):
     _semantic_error_diags.pop(uri, None)
     _mcdoc_diags.pop(uri, None)
     _metadata_diags.pop(uri, None)
+    _block_delim_diags.pop(uri, None)
     _resolver.forget(uri)
     # If a .comp was closed, clear its source override and evict from readers
     # so next access re-reads from disk (handles external edits too).
@@ -930,6 +993,32 @@ def completion(params: lsp.CompletionParams) -> lsp.CompletionList | None:
 # ---------------------------------------------------------------------------
 # Hover
 # ---------------------------------------------------------------------------
+
+@server.feature(lsp.TEXT_DOCUMENT_FOLDING_RANGE)
+def folding_range(params: lsp.FoldingRangeParams) -> list[lsp.FoldingRange]:
+    """Return fold regions for every %{ ... %} block.
+
+    ``end_line`` is set to the line *before* the ``%}`` line so that the
+    closing delimiter stays visible after folding — matching the behaviour of
+    ``{`` / ``}`` blocks in JSON and C.
+    """
+    uri = params.text_document.uri
+    doc = _docs.get(uri)
+    if doc is None:
+        return []
+    ranges: list[lsp.FoldingRange] = []
+    stack: list[int] = []          # start lines of unmatched %{ tokens
+    for line_idx, line_text in enumerate(doc.source.splitlines()):
+        if _re.search(r'%\{', line_text):
+            stack.append(line_idx)
+        elif _re.search(r'%\}', line_text):
+            if stack:
+                start = stack.pop()
+                end = line_idx - 1   # %} line itself stays visible
+                if end > start:
+                    ranges.append(lsp.FoldingRange(start_line=start, end_line=end))
+    return ranges
+
 
 @server.feature(lsp.TEXT_DOCUMENT_HOVER)
 def hover(params: lsp.HoverParams) -> lsp.Hover | None:

@@ -2,207 +2,375 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "McCode",
   "scopeName": "source.mccode",
-  "fileTypes": ["instr", "comp"],
+  "fileTypes": [
+    "instr",
+    "comp"
+  ],
   "patterns": [
-    { "include": "#metadata_json" },
-    { "include": "#metadata_yaml" },
-    { "include": "#metadata_xml" },
-    { "include": "#metadata_python" },
-    { "include": "#metadata_shell" },
-    { "include": "#metadata_js" },
-    { "include": "#metadata_declaration" },
-    { "include": "#c_block" },
-    { "include": "#line_comment" },
-    { "include": "#block_comment" },
-    { "include": "#string_literal" },
-    { "include": "#component_instantiation" },
-    { "include": "#section_keywords" },
-    { "include": "#flow_keywords" },
-    { "include": "#position_keywords" },
-    { "include": "#number_literal" },
-    { "include": "#identifier" }
+    {
+      "include": "#metadata_json"
+    },
+    {
+      "include": "#metadata_yaml"
+    },
+    {
+      "include": "#metadata_xml"
+    },
+    {
+      "include": "#metadata_python"
+    },
+    {
+      "include": "#metadata_shell"
+    },
+    {
+      "include": "#metadata_js"
+    },
+    {
+      "include": "#metadata_markdown"
+    },
+    {
+      "include": "#metadata_declaration"
+    },
+    {
+      "include": "#c_block"
+    },
+    {
+      "include": "#line_comment"
+    },
+    {
+      "include": "#block_comment"
+    },
+    {
+      "include": "#string_literal"
+    },
+    {
+      "include": "#component_instantiation"
+    },
+    {
+      "include": "#section_keywords"
+    },
+    {
+      "include": "#flow_keywords"
+    },
+    {
+      "include": "#position_keywords"
+    },
+    {
+      "include": "#number_literal"
+    },
+    {
+      "include": "#identifier"
+    }
   ],
   "repository": {
-
     "metadata_json": {
-      "comment": "METADATA block with JSON content — begin matches declaration line only; %{ handled as inner punctuation so the rule works when %{ is on the next line.",
+      "comment": "METADATA block with JSON content \u2014 begin matches declaration line only; %{ handled as inner punctuation so the rule works when %{ is on the next line.",
       "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:application/json|text/json)\")\\s+(\\w+)",
       "end": "%\\}",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.mccode" },
-        "2": { "name": "string.quoted.double.mccode" },
-        "3": { "name": "entity.name.variable.mccode" }
+        "1": {
+          "name": "keyword.other.section.mccode"
+        },
+        "2": {
+          "name": "string.quoted.double.mccode"
+        },
+        "3": {
+          "name": "entity.name.variable.mccode"
+        }
       },
-      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
+      },
       "patterns": [
-        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
-        { "include": "source.json" }
+        {
+          "match": "%\\{",
+          "name": "punctuation.definition.block.mccode"
+        },
+        {
+          "include": "source.json"
+        }
       ]
     },
-
     "metadata_yaml": {
       "comment": "METADATA block with YAML content.",
       "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/x-yaml|application/yaml|application/x-yaml|text/yaml)\")\\s+(\\w+)",
       "end": "%\\}",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.mccode" },
-        "2": { "name": "string.quoted.double.mccode" },
-        "3": { "name": "entity.name.variable.mccode" }
+        "1": {
+          "name": "keyword.other.section.mccode"
+        },
+        "2": {
+          "name": "string.quoted.double.mccode"
+        },
+        "3": {
+          "name": "entity.name.variable.mccode"
+        }
       },
-      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
+      },
       "patterns": [
-        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
-        { "include": "source.yaml" }
+        {
+          "match": "%\\{",
+          "name": "punctuation.definition.block.mccode"
+        },
+        {
+          "include": "source.yaml"
+        }
       ]
     },
-
     "metadata_xml": {
       "comment": "METADATA block with XML content.",
       "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/xml|application/xml|application/xhtml\\+xml)\")\\s+(\\w+)",
       "end": "%\\}",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.mccode" },
-        "2": { "name": "string.quoted.double.mccode" },
-        "3": { "name": "entity.name.variable.mccode" }
+        "1": {
+          "name": "keyword.other.section.mccode"
+        },
+        "2": {
+          "name": "string.quoted.double.mccode"
+        },
+        "3": {
+          "name": "entity.name.variable.mccode"
+        }
       },
-      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
+      },
       "patterns": [
-        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
-        { "include": "text.xml" }
+        {
+          "match": "%\\{",
+          "name": "punctuation.definition.block.mccode"
+        },
+        {
+          "include": "text.xml"
+        }
       ]
     },
-
     "metadata_python": {
       "comment": "METADATA block with Python content.",
-      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/x-python|application/x-python)\")\\s+(\\w+)",
+      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/x-python|application/x-python|application/x-python-code|python)\")\\s+(\\w+)",
       "end": "%\\}",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.mccode" },
-        "2": { "name": "string.quoted.double.mccode" },
-        "3": { "name": "entity.name.variable.mccode" }
+        "1": {
+          "name": "keyword.other.section.mccode"
+        },
+        "2": {
+          "name": "string.quoted.double.mccode"
+        },
+        "3": {
+          "name": "entity.name.variable.mccode"
+        }
       },
-      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
+      },
       "patterns": [
-        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
-        { "include": "source.python" }
+        {
+          "match": "%\\{",
+          "name": "punctuation.definition.block.mccode"
+        },
+        {
+          "include": "source.python"
+        }
       ]
     },
-
     "metadata_shell": {
       "comment": "METADATA block with shell-script content.",
       "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/x-sh|application/x-sh|text/x-shellscript)\")\\s+(\\w+)",
       "end": "%\\}",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.mccode" },
-        "2": { "name": "string.quoted.double.mccode" },
-        "3": { "name": "entity.name.variable.mccode" }
+        "1": {
+          "name": "keyword.other.section.mccode"
+        },
+        "2": {
+          "name": "string.quoted.double.mccode"
+        },
+        "3": {
+          "name": "entity.name.variable.mccode"
+        }
       },
-      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
+      },
       "patterns": [
-        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
-        { "include": "source.shell" }
+        {
+          "match": "%\\{",
+          "name": "punctuation.definition.block.mccode"
+        },
+        {
+          "include": "source.shell"
+        }
       ]
     },
-
     "metadata_js": {
       "comment": "METADATA block with JavaScript content.",
       "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/javascript|application/javascript)\")\\s+(\\w+)",
       "end": "%\\}",
       "beginCaptures": {
-        "1": { "name": "keyword.other.section.mccode" },
-        "2": { "name": "string.quoted.double.mccode" },
-        "3": { "name": "entity.name.variable.mccode" }
+        "1": {
+          "name": "keyword.other.section.mccode"
+        },
+        "2": {
+          "name": "string.quoted.double.mccode"
+        },
+        "3": {
+          "name": "entity.name.variable.mccode"
+        }
       },
-      "endCaptures": { "0": { "name": "punctuation.definition.block.mccode" } },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
+      },
       "patterns": [
-        { "match": "%\\{", "name": "punctuation.definition.block.mccode" },
-        { "include": "source.js" }
+        {
+          "match": "%\\{",
+          "name": "punctuation.definition.block.mccode"
+        },
+        {
+          "include": "source.js"
+        }
       ]
     },
-
     "metadata_declaration": {
       "comment": "Highlight METADATA declaration for MIME types not covered above (content stays as C via c_block).",
       "match": "(?i)(\\bMETADATA\\b)\\s+(\"[^\"]*\"|\\w+)\\s+(\\w+)",
       "captures": {
-        "1": { "name": "keyword.other.section.mccode" },
-        "2": { "name": "string.quoted.double.mccode" },
-        "3": { "name": "entity.name.variable.mccode" }
+        "1": {
+          "name": "keyword.other.section.mccode"
+        },
+        "2": {
+          "name": "string.quoted.double.mccode"
+        },
+        "3": {
+          "name": "entity.name.variable.mccode"
+        }
       }
     },
-
     "c_block": {
       "name": "meta.embedded.block.c source.c",
       "begin": "%\\{",
       "end": "%\\}",
       "beginCaptures": {
-        "0": { "name": "punctuation.definition.block.mccode" }
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
       },
       "endCaptures": {
-        "0": { "name": "punctuation.definition.block.mccode" }
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
       },
       "patterns": [
-        { "include": "source.c" }
+        {
+          "include": "source.c"
+        }
       ]
     },
-
     "line_comment": {
       "name": "comment.line.double-slash.mccode",
       "match": "//.*$"
     },
-
     "block_comment": {
       "name": "comment.block.mccode",
       "begin": "/\\*",
       "end": "\\*/",
       "captures": {
-        "0": { "name": "punctuation.definition.comment.mccode" }
+        "0": {
+          "name": "punctuation.definition.comment.mccode"
+        }
       }
     },
-
     "string_literal": {
       "name": "string.quoted.double.mccode",
       "begin": "\"",
       "end": "\"",
       "patterns": [
-        { "name": "constant.character.escape.mccode", "match": "\\\\." }
+        {
+          "name": "constant.character.escape.mccode",
+          "match": "\\\\."
+        }
       ]
     },
-
     "component_instantiation": {
       "comment": "COMPONENT <instance> = <type>(<args>)",
       "name": "meta.component.instantiation.mccode",
       "match": "(?i)\\b(COMPONENT)\\s+(\\w+)\\s*(=)\\s*(\\w+)",
       "captures": {
-        "1": { "name": "keyword.control.mccode" },
-        "2": { "name": "entity.name.variable.mccode" },
-        "3": { "name": "keyword.operator.assignment.mccode" },
-        "4": { "name": "entity.name.type.component.mccode" }
+        "1": {
+          "name": "keyword.control.mccode"
+        },
+        "2": {
+          "name": "entity.name.variable.mccode"
+        },
+        "3": {
+          "name": "keyword.operator.assignment.mccode"
+        },
+        "4": {
+          "name": "entity.name.type.component.mccode"
+        }
       }
     },
-
     "section_keywords": {
       "name": "keyword.other.section.mccode",
       "match": "(?i)\\b(DEFINE|INSTRUMENT|DECLARE|USERVARS|INITIALIZE|INITIALISE|TRACE|SAVE|FINALLY|END|DEFINITION|SETTING|OUTPUT|PARAMETERS|SHARE|MCDISPLAY|DISPLAY|CATEGORY|DEPENDENCY|METADATA|SEARCH)\\b"
     },
-
     "flow_keywords": {
       "name": "keyword.control.mccode",
       "match": "(?i)\\b(EXTEND|JUMP|WHEN|ITERATE|GROUP|SPLIT|COPY|INHERIT|REMOVABLE|NOACC|PRIVATE|INCLUDE|SHELL)\\b"
     },
-
     "position_keywords": {
       "name": "keyword.other.position.mccode",
       "match": "(?i)\\b(AT|ROTATED|RELATIVE|ABSOLUTE|PREVIOUS|NEXT|MYSELF)\\b"
     },
-
     "number_literal": {
       "name": "constant.numeric.mccode",
       "match": "\\b(\\d+\\.?\\d*([eE][+-]?\\d+)?)\\b"
     },
-
     "identifier": {
       "name": "variable.other.mccode",
       "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    },
+    "metadata_markdown": {
+      "comment": "METADATA block with Markdown content.",
+      "begin": "(?i)(\\bMETADATA\\b)\\s+(\"(?:text/markdown|text/x-markdown|markdown)\")\\s+(\\w+)",
+      "end": "%\\}",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.section.mccode"
+        },
+        "2": {
+          "name": "string.quoted.double.mccode"
+        },
+        "3": {
+          "name": "entity.name.variable.mccode"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.mccode"
+        }
+      },
+      "patterns": [
+        {
+          "match": "%\\{",
+          "name": "punctuation.definition.block.mccode"
+        },
+        {
+          "include": "text.html.markdown"
+        }
+      ]
     }
   }
 }

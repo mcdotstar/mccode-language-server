@@ -193,3 +193,28 @@ class TestCBridge:
         first = min(vdoc.regions, key=lambda r: r.mccode_line)
         assert vdoc.region_at_mccode(first.mccode_line, 0) is first
         assert vdoc.region_at_mccode(1, 0) is None
+
+    def test_search_dirs_finds_local_comp(self, tmp_path):
+        """build_virtual_c with search_dirs finds a .comp file in a local directory."""
+        comp_source = """\
+DEFINE COMPONENT local_only_comp
+SETTING PARAMETERS (double x = 0)
+TRACE %{ /* nothing */ %}
+END
+"""
+        (tmp_path / 'local_only_comp.comp').write_text(comp_source)
+        instr_source = """\
+DEFINE INSTRUMENT T()
+TRACE
+COMPONENT a = local_only_comp()
+AT (0,0,0) ABSOLUTE
+END
+"""
+        from mclsp.c_bridge import build_virtual_c
+        doc = parse_document('file:///tmp/test.instr', instr_source)
+        vdoc = build_virtual_c(doc, flavor='mcstas', search_dirs=[str(tmp_path)])
+        assert vdoc is not None
+        assert len(vdoc.virtual_source) > 200  # more than an error comment
+        # Error comments from mclsp start with '/* mclsp:'; a successful
+        # translation starts with '/* Automatically generated'.
+        assert '/* mclsp:' not in vdoc.virtual_source

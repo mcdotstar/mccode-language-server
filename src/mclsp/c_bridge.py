@@ -161,15 +161,28 @@ def _safe_registries(flavor_enum, have: list) -> list:
 
 
 def _translate_instr(source: str, source_filename: str, flavor_enum,
-                     extra_registries=None) -> str | None:
+                     extra_registries=None, search_dirs: list[str] | None = None) -> str | None:
     """Parse and translate a ``.instr`` source string to C using mccode_antlr.
-    Returns the C text on success, or a C comment describing the error."""
+    Returns the C text on success, or a C comment describing the error.
+
+    *search_dirs* is an ordered list of directories to prepend as
+    ``LocalRegistry`` entries so that components found via ``SEARCH`` /
+    ``SEARCH SHELL`` directives (and the document's own directory) are
+    available to the translator at the same priority as in the LSP handlers.
+    """
     import sys
-    from io import StringIO
+    from pathlib import Path as _Path
     from mccode_antlr.loader.loader import parse_mccode_instr
-    from mccode_antlr.reader.registry import ensure_registries
+    from mccode_antlr.reader.registry import LocalRegistry
     from mccode_antlr.translators.c import CTargetVisitor
-    registries = _safe_registries(flavor_enum, list(extra_registries or []))
+    # Prepend a LocalRegistry for each extra search directory (doc dir, SEARCH
+    # dirs) so the translator finds local .comp files before the remote registry.
+    local_regs = [
+        LocalRegistry(f'mclsp_local_{i}', d, priority=150)
+        for i, d in enumerate(search_dirs or [])
+        if _Path(d).is_dir()
+    ]
+    registries = _safe_registries(flavor_enum, local_regs + list(extra_registries or []))
     # mccode_antlr prints progress messages to stdout; redirect to stderr so
     # they don't corrupt the LSP stdio stream.
     _stdout, sys.stdout = sys.stdout, sys.stderr
@@ -246,7 +259,8 @@ def _translate_comp(source: str, source_filename: str, flavor_enum,
 # ---------------------------------------------------------------------------
 
 def build_virtual_c(doc: 'ParsedDocument', flavor: str = 'mcstas',
-                    extra_registries=None) -> VirtualCDocument | None:
+                    extra_registries=None,
+                    search_dirs: list[str] | None = None) -> VirtualCDocument | None:
     """Build a :class:`VirtualCDocument` from a parsed McCode document.
 
     *extra_registries* is an optional list of
@@ -254,6 +268,13 @@ def build_virtual_c(doc: 'ParsedDocument', flavor: str = 'mcstas',
     :class:`~mccode_antlr.reader.registry.InMemoryRegistry`) that are
     prepended to the default on-disk registries.  This is mainly useful in
     tests to supply stub components without touching real component files.
+
+    *search_dirs* is an ordered list of directory paths (strings) that are
+    each wrapped in a :class:`~mccode_antlr.reader.registry.LocalRegistry`
+    and prepended ahead of the normal registries.  This should include the
+    document's own directory and any paths produced by ``SEARCH`` /
+    ``SEARCH SHELL`` directives so the translator finds the same components
+    that the LSP handlers find.
 
     Returns ``None`` if translation fails or produces no C output.
     """
@@ -275,7 +296,8 @@ def build_virtual_c(doc: 'ParsedDocument', flavor: str = 'mcstas',
         filename = PurePosixPath(uri).name
 
     if doc.suffix == '.instr':
-        virtual_source = _translate_instr(doc.source, filename, flavor_enum, extra_registries)
+        virtual_source = _translate_instr(doc.source, filename, flavor_enum,
+                                          extra_registries, search_dirs=search_dirs)
     elif doc.suffix == '.comp':
         virtual_source = _translate_comp(doc.source, filename, flavor_enum, extra_registries)
     else:

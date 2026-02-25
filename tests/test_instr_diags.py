@@ -153,3 +153,71 @@ END
         assert _mime_to_language_id('text/xml') == 'xml'
         assert _mime_to_language_id('text/x-csrc') == 'c'
         assert _mime_to_language_id('application/x-unknown') is None
+        # Informal / bare types users are likely to write
+        assert _mime_to_language_id('python') == 'python'
+        assert _mime_to_language_id('text/x-python') == 'python'
+        assert _mime_to_language_id('markdown') == 'markdown'
+        assert _mime_to_language_id('text/markdown') == 'markdown'
+        assert _mime_to_language_id('text/x-markdown') == 'markdown'
+
+    def test_valid_python_produces_no_diags(self):
+        source = """\
+DEFINE INSTRUMENT T()
+METADATA "python" script
+%{
+def greet(name):
+    return f"hello {name}"
+%}
+TRACE
+END
+"""
+        assert self._compute(source) == []
+
+    def test_invalid_python_produces_error(self):
+        source = """\
+DEFINE INSTRUMENT T()
+METADATA "python" script
+%{
+def greet(name)
+    return name
+%}
+TRACE
+END
+"""
+        diags = self._compute(source)
+        assert len(diags) == 1
+        assert 'Python' in diags[0].message
+
+
+class TestBlockDelimDiags:
+    """_update_block_delim_diags warns on {% and %} (Jinja-style typos)."""
+
+    def _compute(self, source: str):
+        import mclsp.server as srv
+        from mclsp.server import _block_delim_diags, _update_block_delim_diags
+        from mclsp.document import parse_document
+        uri = 'file:///tmp/test_delim.instr'
+        srv._docs[uri] = parse_document(uri, source)
+        _update_block_delim_diags(uri)
+        return _block_delim_diags.get(uri, [])
+
+    def test_jinja_open_brace_warned(self):
+        diags = self._compute('DECLARE {% int x; %}\n')
+        messages = [d.message for d in diags]
+        assert any('{%' in m for m in messages)
+
+    def test_jinja_close_brace_warned(self):
+        diags = self._compute('DECLARE %{ int x; }%\n')
+        messages = [d.message for d in diags]
+        assert any('}%' in m for m in messages)
+
+    def test_correct_delimiters_no_warning(self):
+        diags = self._compute('DECLARE %{\nint x;\n%}\n')
+        assert diags == []
+
+    def test_warning_points_at_correct_column(self):
+        source = 'DECLARE {% int x; }%\n'
+        diags = self._compute(source)
+        cols = {d.range.start.character for d in diags}
+        assert 8 in cols   # '{%' starts at column 8
+        assert 18 in cols  # '}%' starts at column 18
