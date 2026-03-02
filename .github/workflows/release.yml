@@ -47,7 +47,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: python-dist
           path: dist
@@ -98,7 +98,7 @@ jobs:
 
     steps:
       - name: Download Artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: vsix
           path: vsix
