@@ -27,7 +27,7 @@ jobs:
       - name: Check package metadata
         run: pipx run twine check dist/*
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: python-dist
           path: dist/*
@@ -83,7 +83,7 @@ jobs:
       - name: Package extension
         run: npx @vscode/vsce package
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: vsix
           path: vscode-extension/*.vsix
